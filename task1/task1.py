@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import os
 from scipy.ndimage import gaussian_filter
+import math
 
 
 class VRPipeline:
@@ -85,6 +86,33 @@ class VRPipeline:
         distorted = np.zeros_like(img)
 
         # Your implementation here
+        center_x = (w) / 2
+        center_y = (h) / 2
+        d = int(min(w, h) / 2)
+
+        for y in range(h):
+            for x in range(w):
+                # Calculate the distance from the center
+
+                dx = (x - center_x) / center_x
+                dy = (y - center_y) / center_y
+                r = math.sqrt(dx**2 + dy**2)
+                radial_distortion = r * (1 + k1*r**2 + k2*r**4) 
+                #tangential_distortion_x = 2 * p1 * dx * dy + p2 * (r**2 + 2 * dx**2)
+                #tangential_distortion_y = p1 * (r**2 + 2 * dy**2) + 2 * p2 * dx * dy
+                distorted_x = int(center_x + center_x *(dx * radial_distortion ))
+                distorted_y = int(center_y + center_y *(dy * radial_distortion ))
+
+                # Check if the distorted coordinates are within the image bounds
+                if 0 <= distorted_x < w and 0 <= distorted_y < h:
+                    # Set the pixel color at (x,y) to the color of the distorted pixel at (distorted_x,distorted_y)
+                    distorted[y][x] = img[distorted_y][distorted_x]
+        # Convert the distorted image back to uint8
+        distorted_img = distorted.astype(np.uint8)
+
+        self.distorted_img = distorted_img
+
+        
         # ...
 
         # Save output if requested
@@ -138,7 +166,30 @@ class VRPipeline:
         result = np.zeros_like(img)
 
         # Your implementation here
-        # ...
+        center_x = w / 2
+        center_y = h / 2
+        d = int(min(w, h) / 2)
+
+        # Iterate through each pixel in the image
+        for y in range(h):
+            for x in range(w):
+                # Calculate distance from the center
+                dx, dy = x - center_x, y - center_y
+                
+                # Red channel (expand outward)
+                rx, ry = int(dx * r_scale + center_x), int(dy * r_scale + center_y)
+                if 0 <= rx < w and 0 <= ry < h:
+                    result[y, x, 0] = img[ry, rx, 0]
+
+                # Green channel (no change)
+                gx, gy = int(dx * g_scale + center_x), int(dy * g_scale + center_y)
+                if 0 <= gx < w and 0 <= gy < h:
+                    result[y, x, 1] = img[gy, gx, 1]
+
+                # Blue channel (contract inward)
+                bx, by = int(dx * b_scale + center_x), int(dy * b_scale + center_y)
+                if 0 <= bx < w and 0 <= by < h:
+                    result[y, x, 2] = img[by, bx, 2]
 
         # Save output if requested
         if save_output and result is not None and result.size > 0:
@@ -192,6 +243,28 @@ class VRPipeline:
         result = img.copy().astype(np.float32)
 
         # Your implementation here
+
+        gaze_x, gaze_y = w // 2, h // 2  # Assuming the gaze point is at the center of the image.
+
+        # Create a grid for distance calculation
+        y_grid, x_grid = np.ogrid[:h, :w]
+        dist_from_gaze = np.sqrt((x_grid - gaze_x) ** 2 + (y_grid - gaze_y) ** 2)
+
+        # Determine blur levels and blend based on distance
+        max_sigma = 10  # Maximum sigma for blurring, can be adjusted.
+        for y in range(h):
+            for x in range(w):
+                if dist_from_gaze[y, x] < inner_radius:
+                    continue  # No blur for pixels within inner_radius
+                elif dist_from_gaze[y, x] > outer_radius:
+                    sigma = max_sigma  # Maximum blur for pixels beyond outer_radius
+                else:
+                    # Linear interpolation between inner_radius and outer_radius
+                    ratio = (dist_from_gaze[y, x] - inner_radius) / (outer_radius - inner_radius)
+                    sigma = ratio * max_sigma
+                
+                # Apply Gaussian blur with computed sigma
+                result[y, x, :] = gaussian_filter(img.astype(np.float32), sigma=(sigma, sigma, 0))[y, x, :]
         # ...
 
         # Save output if requested
@@ -432,4 +505,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main() 
