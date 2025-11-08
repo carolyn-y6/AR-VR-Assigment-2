@@ -203,7 +203,7 @@ class VRPipeline:
         return result
 
     def apply_foveated_rendering(
-        self, img, inner_radius=100, outer_radius=250, save_output=True
+            self, img, inner_radius=100, outer_radius=250, save_output=True
     ):
         """
         Apply foveated rendering - blur peripheral vision to save computation
@@ -220,52 +220,84 @@ class VRPipeline:
 
         Returns:
             Image with peripheral blur applied
-
-        Implementation hints:
-            - Calculate distance from each pixel to gaze point
-            - Blur strength should increase with distance from gaze
-            - Use linear interpolation between inner and outer radius
-            - For pixels within inner_radius: no blur
-            - For pixels beyond outer_radius: maximum blur
-            - Between them: gradually increase blur
-            - scipy.ndimage.gaussian_filter is useful for blurring
-            - Consider creating multiple blur levels and blending
         """
         print("Applying foveated rendering...")
 
         h, w = img.shape[:2]
-        # TODO: Implement foveated rendering
+
         # Step 1: Calculate distance from each pixel to gaze point
+        # Use center
+        gaze_x = getattr(self, 'gaze_x', w // 2)
+        gaze_y = getattr(self, 'gaze_y', h // 2)
+
+        # Create coordinate grids for distance calculation
+        y_coords, x_coords = np.ogrid[:h, :w]
+        dist_from_gaze = np.sqrt((x_coords - gaze_x) ** 2 + (y_coords - gaze_y) ** 2)
+
         # Step 2: Compute blur strength based on distance
+        max_sigma = 10.0  # Maximum blur strength
+        blur_mask = np.zeros_like(dist_from_gaze, dtype=np.float32)
+        blur_mask[dist_from_gaze <= inner_radius] = 0.0
+        blur_mask[dist_from_gaze > outer_radius] = 1.0
+
+        in_transition = (dist_from_gaze > inner_radius) & (dist_from_gaze <= outer_radius)
+        blur_mask[in_transition] = (dist_from_gaze[in_transition] - inner_radius) / (outer_radius - inner_radius)
+
         # Step 3: Create blurred versions of the image (different sigma values)
+        from scipy.ndimage import gaussian_filter
+
+        # Create blur levels
+        num_blur_levels = 3
+        blurred_versions = []
+
+        # Original image (no blur)
+        original_float = img.astype(np.float32)
+        blurred_versions.append(original_float)
+
+        # Create progressively more blurred versions
+        for i in range(1, num_blur_levels):
+            sigma = (i / (num_blur_levels - 1)) * max_sigma
+            blurred_img = np.zeros_like(original_float)
+
+            # Apply Gaussian blur to each channel separately
+            for channel in range(3):
+                blurred_img[..., channel] = gaussian_filter(
+                    original_float[..., channel],
+                    sigma=sigma
+                )
+            blurred_versions.append(blurred_img)
+
         # Step 4: Blend based on distance (sharp in center, blurred at edges)
+        result = np.zeros_like(original_float)
 
-        result = img.copy().astype(np.float32)
+        level_mask = (blur_mask * (num_blur_levels - 1)).astype(int)
+        level_mask = np.clip(level_mask, 0, num_blur_levels - 1)
 
-        # Your implementation here
+        continuous_level = blur_mask * (num_blur_levels - 1)
+        weight_to_next = continuous_level - level_mask
 
-        gaze_x, gaze_y = w // 2, h // 2  # Assuming the gaze point is at the center of the image.
+        # Blend the images based on the blur mask
+        for i in range(num_blur_levels):
+            # For pixels that exactly match this blur level
+            exact_mask = (level_mask == i) & (weight_to_next == 0)
+            if np.any(exact_mask):
+                result[exact_mask] = blurred_versions[i][exact_mask]
 
-        # Create a grid for distance calculation
-        y_grid, x_grid = np.ogrid[:h, :w]
-        dist_from_gaze = np.sqrt((x_grid - gaze_x) ** 2 + (y_grid - gaze_y) ** 2)
+            # For pixels that are between this level and the next
+            if i < num_blur_levels - 1:
+                blend_mask = (level_mask == i) & (weight_to_next > 0)
+                if np.any(blend_mask):
+                    # Linear interpolation between current and next blur level
+                    current_weight = 1 - weight_to_next[blend_mask, np.newaxis]
+                    next_weight = weight_to_next[blend_mask, np.newaxis]
 
-        # Determine blur levels and blend based on distance
-        max_sigma = 10  # Maximum sigma for blurring, can be adjusted.
-        for y in range(h):
-            for x in range(w):
-                if dist_from_gaze[y, x] < inner_radius:
-                    continue  # No blur for pixels within inner_radius
-                elif dist_from_gaze[y, x] > outer_radius:
-                    sigma = max_sigma  # Maximum blur for pixels beyond outer_radius
-                else:
-                    # Linear interpolation between inner_radius and outer_radius
-                    ratio = (dist_from_gaze[y, x] - inner_radius) / (outer_radius - inner_radius)
-                    sigma = ratio * max_sigma
-                
-                # Apply Gaussian blur with computed sigma
-                result[y, x, :] = gaussian_filter(img.astype(np.float32), sigma=(sigma, sigma, 0))[y, x, :]
-        # ...
+                    result[blend_mask] = (
+                            blurred_versions[i][blend_mask] * current_weight +
+                            blurred_versions[i + 1][blend_mask] * next_weight
+                    )
+
+        # Ensure we don't have any invalid pixels
+        result = np.clip(result, 0, 255)
 
         # Save output if requested
         result_uint8 = result.astype(np.uint8)
@@ -274,7 +306,6 @@ class VRPipeline:
             Image.fromarray(result_uint8).save(output_path)
             print(f"  -> Saved output: {output_path}")
 
-        print(f"  -> Applied foveated rendering (gaze: {self.gaze_x}, {self.gaze_y})")
         return result_uint8
 
     def render_pipeline(self, output_dir="."):
