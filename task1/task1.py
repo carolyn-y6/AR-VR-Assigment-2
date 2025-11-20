@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import os
 from scipy.ndimage import gaussian_filter
+import math
 
 
 class VRPipeline:
@@ -85,6 +86,33 @@ class VRPipeline:
         distorted = np.zeros_like(img)
 
         # Your implementation here
+        center_x = (w) / 2
+        center_y = (h) / 2
+        d = int(min(w, h) / 2)
+
+        for y in range(h):
+            for x in range(w):
+                # Calculate the distance from the center
+
+                dx = (x - center_x) / center_x
+                dy = (y - center_y) / center_y
+                r = math.sqrt(dx**2 + dy**2)
+                radial_distortion = r * (1 + k1*r**2 + k2*r**4) 
+                #tangential_distortion_x = 2 * p1 * dx * dy + p2 * (r**2 + 2 * dx**2)
+                #tangential_distortion_y = p1 * (r**2 + 2 * dy**2) + 2 * p2 * dx * dy
+                distorted_x = int(center_x + center_x *(dx * radial_distortion ))
+                distorted_y = int(center_y + center_y *(dy * radial_distortion ))
+
+                # Check if the distorted coordinates are within the image bounds
+                if 0 <= distorted_x < w and 0 <= distorted_y < h:
+                    # Set the pixel color at (x,y) to the color of the distorted pixel at (distorted_x,distorted_y)
+                    distorted[y][x] = img[distorted_y][distorted_x]
+        # Convert the distorted image back to uint8
+        distorted_img = distorted.astype(np.uint8)
+
+        self.distorted_img = distorted_img
+
+        
         # ...
 
         # Save output if requested
@@ -138,7 +166,30 @@ class VRPipeline:
         result = np.zeros_like(img)
 
         # Your implementation here
-        # ...
+        center_x = w / 2
+        center_y = h / 2
+        d = int(min(w, h) / 2)
+
+        # Iterate through each pixel in the image
+        for y in range(h):
+            for x in range(w):
+                # Calculate distance from the center
+                dx, dy = x - center_x, y - center_y
+                
+                # Red channel (expand outward)
+                rx, ry = int(dx * r_scale + center_x), int(dy * r_scale + center_y)
+                if 0 <= rx < w and 0 <= ry < h:
+                    result[y, x, 0] = img[ry, rx, 0]
+
+                # Green channel (no change)
+                gx, gy = int(dx * g_scale + center_x), int(dy * g_scale + center_y)
+                if 0 <= gx < w and 0 <= gy < h:
+                    result[y, x, 1] = img[gy, gx, 1]
+
+                # Blue channel (contract inward)
+                bx, by = int(dx * b_scale + center_x), int(dy * b_scale + center_y)
+                if 0 <= bx < w and 0 <= by < h:
+                    result[y, x, 2] = img[by, bx, 2]
 
         # Save output if requested
         if save_output and result is not None and result.size > 0:
@@ -152,7 +203,7 @@ class VRPipeline:
         return result
 
     def apply_foveated_rendering(
-        self, img, inner_radius=100, outer_radius=250, save_output=True
+            self, img, inner_radius=100, outer_radius=250, save_output=True
     ):
         """
         Apply foveated rendering - blur peripheral vision to save computation
@@ -169,30 +220,59 @@ class VRPipeline:
 
         Returns:
             Image with peripheral blur applied
-
-        Implementation hints:
-            - Calculate distance from each pixel to gaze point
-            - Blur strength should increase with distance from gaze
-            - Use linear interpolation between inner and outer radius
-            - For pixels within inner_radius: no blur
-            - For pixels beyond outer_radius: maximum blur
-            - Between them: gradually increase blur
-            - scipy.ndimage.gaussian_filter is useful for blurring
-            - Consider creating multiple blur levels and blending
         """
         print("Applying foveated rendering...")
 
         h, w = img.shape[:2]
-        # TODO: Implement foveated rendering
+
         # Step 1: Calculate distance from each pixel to gaze point
+        # Use center
+        gaze_x = getattr(self, 'gaze_x', w // 2)
+        gaze_y = getattr(self, 'gaze_y', h // 2)
+
+        # Create coordinate grids for distance calculation
+        y_coords, x_coords = np.ogrid[:h, :w]
+        dist_from_gaze = np.sqrt((x_coords - gaze_x) ** 2 + (y_coords - gaze_y) ** 2)
+
         # Step 2: Compute blur strength based on distance
+        max_sigma = 10.0  # Maximum blur strength
+        blur_mask = np.zeros_like(dist_from_gaze, dtype=np.float32)
+        blur_mask[dist_from_gaze <= inner_radius] = 0.0
+        blur_mask[dist_from_gaze > outer_radius] = 1.0
+
+        in_transition = (dist_from_gaze > inner_radius) & (dist_from_gaze <= outer_radius)
+        blur_mask[in_transition] = (dist_from_gaze[in_transition] - inner_radius) / (outer_radius - inner_radius)
+
         # Step 3: Create blurred versions of the image (different sigma values)
+        from scipy.ndimage import gaussian_filter
+
+        # Create blur levels
+        num_blur_levels = 3
+        blurred_versions = []
+
+        # Original image (no blur)
+        original_float = img.astype(np.float32)
+        blurred_versions.append(original_float)
+
+        # Create progressively more blurred versions
+        for i in range(1, num_blur_levels):
+            sigma = (i / (num_blur_levels - 1)) * max_sigma
+            blurred_img = np.zeros_like(original_float)
+
+            # Apply Gaussian blur to each channel separately
+            for channel in range(3):
+                blurred_img[..., channel] = gaussian_filter(
+                    original_float[..., channel],
+                    sigma=sigma
+                )
+            blurred_versions.append(blurred_img)
+
         # Step 4: Blend based on distance (sharp in center, blurred at edges)
 
         result = img.copy().astype(np.float32)
 
         # Your implementation here
-        
+        # ...
 
         # Save output if requested
         result_uint8 = result.astype(np.uint8)
@@ -201,7 +281,6 @@ class VRPipeline:
             Image.fromarray(result_uint8).save(output_path)
             print(f"  -> Saved output: {output_path}")
 
-        print(f"  -> Applied foveated rendering (gaze: {self.gaze_x}, {self.gaze_y})")
         return result_uint8
 
     def render_pipeline(self, output_dir="."):
@@ -432,4 +511,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main() 
