@@ -192,7 +192,7 @@ class VRPipeline:
         result = img.copy().astype(np.float32)
 
         # Your implementation here
-        # ...
+        
 
         # Save output if requested
         result_uint8 = result.astype(np.uint8)

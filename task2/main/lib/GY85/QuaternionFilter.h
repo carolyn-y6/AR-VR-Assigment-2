@@ -232,6 +232,41 @@ public:
         q[2] = q[2] * recipNorm;
         q[3] = q[3] * recipNorm;
     }
+
+    // Convert quaternion to Euler angles (Pitch, Yaw, Roll)
+    // Returns angles in degrees
+    // q: quaternion array [w, x, y, z]
+    // rpy: output array [roll, pitch, yaw] in degrees
+    void quaternionToEuler(float* q, float* rpy) {
+        float qw = q[0], qx = q[1], qy = q[2], qz = q[3];
+        
+        // Rotation matrix coefficients for Euler angles
+        float a12, a22, a31, a32, a33;
+        a12 = 2.0f * (qx * qy + qw * qz);
+        a22 = qw * qw + qx * qx - qy * qy - qz * qz;
+        a31 = 2.0f * (qw * qx + qy * qz);
+        a32 = 2.0f * (qx * qz - qw * qy);
+        a33 = qw * qw - qx * qx - qy * qy + qz * qz;
+        
+        // Calculate Euler angles (Tait-Bryan angles)
+        // Roll (rotation around X-axis)
+        rpy[0] = atan2f(a31, a33);
+        // Pitch (rotation around Y-axis)
+        rpy[1] = -asinf(a32);
+        // Yaw (rotation around Z-axis)
+        rpy[2] = atan2f(a12, a22);
+        
+        // Convert from radians to degrees
+        rpy[0] *= 180.0f / PI;
+        rpy[1] *= 180.0f / PI;
+        rpy[2] *= 180.0f / PI;
+        
+        // Normalize yaw to [-180, 180] range
+        if (rpy[2] >= +180.f)
+            rpy[2] -= 360.f;
+        else if (rpy[2] < -180.f)
+            rpy[2] += 360.f;
+    }
 };
 
 #endif  // QUATERNIONFILTER_H
