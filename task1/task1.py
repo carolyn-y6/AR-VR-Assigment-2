@@ -98,8 +98,6 @@ class VRPipeline:
                 dy = (y - center_y) / center_y
                 r = math.sqrt(dx**2 + dy**2)
                 radial_distortion = r * (1 + k1*r**2 + k2*r**4) 
-                #tangential_distortion_x = 2 * p1 * dx * dy + p2 * (r**2 + 2 * dx**2)
-                #tangential_distortion_y = p1 * (r**2 + 2 * dy**2) + 2 * p2 * dx * dy
                 distorted_x = int(center_x + center_x *(dx * radial_distortion ))
                 distorted_y = int(center_y + center_y *(dy * radial_distortion ))
 
@@ -268,11 +266,36 @@ class VRPipeline:
             blurred_versions.append(blurred_img)
 
         # Step 4: Blend based on distance (sharp in center, blurred at edges)
+        result = np.zeros_like(original_float)
 
-        result = img.copy().astype(np.float32)
+        level_mask = (blur_mask * (num_blur_levels - 1)).astype(int)
+        level_mask = np.clip(level_mask, 0, num_blur_levels - 1)
 
-        # Your implementation here
-        # ...
+        continuous_level = blur_mask * (num_blur_levels - 1)
+        weight_to_next = continuous_level - level_mask
+
+        # Blend the images based on the blur mask
+        for i in range(num_blur_levels):
+            # For pixels that exactly match this blur level
+            exact_mask = (level_mask == i) & (weight_to_next == 0)
+            if np.any(exact_mask):
+                result[exact_mask] = blurred_versions[i][exact_mask]
+
+            # For pixels that are between this level and the next
+            if i < num_blur_levels - 1:
+                blend_mask = (level_mask == i) & (weight_to_next > 0)
+                if np.any(blend_mask):
+                    # Linear interpolation between current and next blur level
+                    current_weight = 1 - weight_to_next[blend_mask, np.newaxis]
+                    next_weight = weight_to_next[blend_mask, np.newaxis]
+
+                    result[blend_mask] = (
+                            blurred_versions[i][blend_mask] * current_weight +
+                            blurred_versions[i + 1][blend_mask] * next_weight
+                    )
+
+        # Ensure we don't have any invalid pixels
+        result = np.clip(result, 0, 255)
 
         # Save output if requested
         result_uint8 = result.astype(np.uint8)
@@ -512,3 +535,4 @@ def main():
 
 if __name__ == "__main__":
     main() 
+
