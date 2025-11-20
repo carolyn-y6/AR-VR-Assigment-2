@@ -41,11 +41,11 @@ def connect():
         ser = serial.Serial(PORT, BAUDRATE, timeout=0.1)
         time.sleep(2)  # Wait for connection to stabilize
         
-        # 清空所有旧数据
+        # Clear any residual data
         ser.reset_input_buffer()
         ser.reset_output_buffer()
         
-        # 读取并丢弃初始的几行数据（可能是旧数据）
+        # Read and discard initial lines that might be stale data
         for _ in range(10):
             if ser.in_waiting > 0:
                 ser.readline()
@@ -101,10 +101,10 @@ def read_serial_data():
         
         if latest_data:
             yaw, pitch, roll = latest_data
-            # 添加到缓冲区进行平滑
+            # Add to buffer for smoothing
             data_buffer.append(latest_data)
             
-            # 计算平滑后的数据（平均值）
+            # Compute smoothed data via averaging
             if len(data_buffer) > 0:
                 avg_yaw = sum(d[0] for d in data_buffer) / len(data_buffer)
                 avg_pitch = sum(d[1] for d in data_buffer) / len(data_buffer)
